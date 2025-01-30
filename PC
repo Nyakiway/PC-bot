@@ -1,0 +1,180 @@
+import telebot
+from telebot import types
+
+# Ваш token
+TOKEN = '7852016424:AAHk7a13d5PQugtx7QQTV-MQ7SwRllj0sYQ'
+bot = telebot.TeleBot(TOKEN)
+
+# Фото-заглушка для всех ПК
+PC_IMAGE_URL = "https://i.ibb.co/84R3dKpV/20250130-234347.jpg"
+
+# Список сообщений, которые нужно удалить
+user_messages = {}
+selected_components = {}  # Для отслеживания выбора комплектующих
+
+# Функция для удаления всех сообщений пользователя
+def delete_previous_messages(chat_id):
+    if chat_id in user_messages:
+        for msg_id in user_messages[chat_id]:
+            try:
+                bot.delete_message(chat_id, msg_id)
+            except:
+                pass  # Сообщение уже удалено или истек срок удаления
+        user_messages[chat_id] = []
+
+# Функция для отправки сообщения и его отслеживания для удаления
+def send_message_and_track(chat_id, text, reply_markup=None, photo=None):
+    delete_previous_messages(chat_id)
+    if photo:
+        msg = bot.send_photo(chat_id, photo, caption=text, reply_markup=reply_markup)
+    else:
+        msg = bot.send_message(chat_id, text, reply_markup=reply_markup)
+    user_messages.setdefault(chat_id, []).append(msg.message_id)
+
+# Главное меню
+@bot.message_handler(commands=['start', 'menu'])
+def main_menu(message):
+    delete_previous_messages(message.chat.id)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("📌 Посмотреть ПК", "⚙️ Собрать ПК", "🧾 Рассчитать бюджет", "❌ Выйти")
+    send_message_and_track(message.chat.id, "💻 Добро пожаловать в магазин ПК! Выберите действие:", reply_markup=markup)
+
+# Каталог ПК
+@bot.message_handler(func=lambda message: message.text == "📌 Посмотреть ПК")
+def show_pcs(message):
+    delete_previous_messages(message.chat.id)
+
+    markup = types.InlineKeyboardMarkup()
+    for i in range(1, 5):
+        markup.add(types.InlineKeyboardButton(f"🖥 Комп {i}", callback_data=f"pc_{i}"))
+
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu"))
+    send_message_and_track(message.chat.id, "💻 Выберите компьютер:", reply_markup=markup)
+
+# Данные о компьютерах
+PC_DATA = {
+    "pc_1": {"price": "30,000₽", "specs": "Intel i3, 8GB RAM, GTX 1050 Ti, 256GB SSD"},
+    "pc_2": {"price": "32,000₽", "specs": "Intel i5, 8GB RAM, GTX 1650, 512GB SSD"},
+    "pc_3": {"price": "36,000₽", "specs": "AMD Ryzen 5, 16GB RAM, GTX 1660, 512GB SSD"},
+    "pc_4": {"price": "40,000₽", "specs": "Intel i5, 16GB RAM, RTX 3050, 1TB HDD + 256GB SSD"},
+}
+
+# Выбор ПК
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pc_"))
+def show_pc_details(call):
+    delete_previous_messages(call.message.chat.id)
+
+    pc = PC_DATA[call.data]
+    text = f"💻 Компьютер\n💰 Цена: {pc['price']}\n⚙️ Характеристики: {pc['specs']}"
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🛒 Купить", callback_data="buy"))
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_to_pcs"))
+
+    send_message_and_track(call.message.chat.id, text, reply_markup=markup, photo=PC_IMAGE_URL)
+
+# Назад в список ПК
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_pcs")
+def back_to_pcs(call):
+    show_pcs(call.message)
+
+# Назад в главное меню
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_menu")
+def back_to_menu(call):
+    main_menu(call.message)
+
+# Покупка ПК
+@bot.callback_query_handler(func=lambda call: call.data == "buy")
+def buy_pc(call):
+    delete_previous_messages(call.message.chat.id)
+    send_message_and_track(call.message.chat.id, "🛒 Покупка оформлена! Ожидайте звонка менеджера.")
+
+# Раздел "Собрать ПК"
+@bot.message_handler(func=lambda message: message.text == "⚙️ Собрать ПК")
+def build_pc(message):
+    delete_previous_messages(message.chat.id)
+    selected_components[message.chat.id] = {}
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("🖥 Процессор", callback_data="select_cpu"),
+        types.InlineKeyboardButton("🎮 Видеокарта", callback_data="select_gpu"),
+        types.InlineKeyboardButton("💾 Оперативная память", callback_data="select_ram"),
+        types.InlineKeyboardButton("🔧 Завершить сборку", callback_data="finish_build")
+    )
+    markup.add(types.InlineKeyboardButton("❌ Отмена сборки", callback_data="cancel_build"))
+
+    send_message_and_track(message.chat.id, "⚙️ Давайте соберем ваш ПК. Выберите компонент:", reply_markup=markup)
+
+# Обработка выбора комплектующих
+COMPONENT_OPTIONS = {
+    "cpu": ["Intel i5", "AMD Ryzen 5", "Intel i7"],
+    "gpu": ["RTX 3060", "GTX 1660", "RTX 3070"],
+    "ram": ["8GB DDR4", "16GB DDR4", "32GB DDR4"]
+}
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("select_"))
+def select_component(call):
+    delete_previous_messages(call.message.chat.id)
+    component_type = call.data.split("_")[1]
+
+    markup = types.InlineKeyboardMarkup()
+    for option in COMPONENT_OPTIONS.get(component_type, []):
+        markup.add(types.InlineKeyboardButton(option, callback_data=f"chosen_{component_type}_{option}"))
+
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_to_build"))
+    send_message_and_track(call.message.chat.id, f"Выберите {component_type.upper()}:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("chosen_"))
+def component_chosen(call):
+    delete_previous_messages(call.message.chat.id)
+    component_type, component_name = call.data.split("_")[1:]
+    selected_components[call.message.chat.id][component_type] = component_name
+    send_message_and_track(call.message.chat.id, f"✅ Вы выбрали: {component_name}")
+    build_pc(call.message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "cancel_build")
+def cancel_build(call):
+    delete_previous_messages(call.message.chat.id)
+    selected_components.pop(call.message.chat.id, None)
+    send_message_and_track(call.message.chat.id, "❌ Сборка ПК отменена.")
+    main_menu(call.message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "finish_build")
+def finish_build(call):
+    delete_previous_messages(call.message.chat.id)
+    components = selected_components.get(call.message.chat.id, {})
+    if not components:
+        send_message_and_track(call.message.chat.id, "⚠️ Вы не выбрали ни одного компонента.")
+        return build_pc(call.message)
+
+    result = "\n".join([f"{key.upper()}: {value}" for key, value in components.items()])
+    send_message_and_track(call.message.chat.id, f"🔧 Ваша сборка ПК:\n{result}\n💰 Рассчитайте бюджет или оформите заказ.")
+    main_menu(call.message)
+
+# Рассчет бюджета
+@bot.message_handler(func=lambda message: message.text == "🧾 Рассчитать бюджет")
+def calculate_budget(message):
+    delete_previous_messages(message.chat.id)
+    components = selected_components.get(message.chat.id, {})
+    prices = {
+        "Intel i5": 10000, "AMD Ryzen 5": 12000, "Intel i7": 15000,
+        "RTX 3060": 30000, "GTX 1660": 20000, "RTX 3070": 40000,
+        "8GB DDR4": 4000, "16GB DDR4": 7000, "32GB DDR4": 12000
+    }
+
+    total = sum(prices.get(component, 0) for component in components.values())
+    if total == 0:
+        send_message_and_track(message.chat.id, "⚠️ Нет выбранных компонентов для расчета бюджета.")
+        return main_menu(message)
+
+    send_message_and_track(message.chat.id, f"💰 Общая стоимость сборки: {total}₽")
+
+# Выход
+@bot.message_handler(func=lambda message: message.text == "❌ Выйти")
+def exit_bot(message):
+    delete_previous_messages(message.chat.id)
+    send_message_and_track(message.chat.id, "👋 До встречи!")
+
+# Запуск бота
+bot.polling(none_stop=True)
